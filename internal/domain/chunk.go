@@ -1,6 +1,6 @@
 package domain
 
-type ChunkID [32]byte
+type ChunkID string
 
 type Chunk struct {
 	ID   ChunkID

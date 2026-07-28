@@ -1,11 +1,11 @@
 package service
 
 import (
-	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
 
+	"github.com/google/uuid"
 	"github.com/tjarktomaszewski/tjarkFS/internal/chunking"
 	"github.com/tjarktomaszewski/tjarkFS/internal/domain"
 	"github.com/tjarktomaszewski/tjarkFS/internal/metadata"
@@ -16,7 +16,7 @@ type ChunkerFactory func(r io.Reader, chunkSize int64) (*chunking.Chunker, error
 
 // TODO: move to designated package
 type FileIDGenerator interface {
-	Generate() [32]byte
+	Generate() string
 }
 
 type UploadService struct {
@@ -41,13 +41,12 @@ func (u *UploadService) Upload(r io.Reader) (*domain.File, error) {
 		return nil, fmt.Errorf("chunker created: %w", err)
 	}
 
-	var fileId [32]byte
-	_, err = io.ReadFull(rand.Reader, fileId[:])
+	fileId, err := uuid.NewUUID()
 	if err != nil {
 		return nil, fmt.Errorf("generate file id: %w", err)
 	}
 	file := &domain.File{
-		ID: fileId,
+		ID: fileId.String(),
 	}
 
 	for {

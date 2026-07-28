@@ -44,7 +44,7 @@ func (c *Chunker) Next() (*domain.ChunkStream, error) {
 	buf = buf[:n]
 	sum := storage.SHA256(buf)
 	chunk := domain.Chunk{
-		ID:   sum,
+		ID:   domain.ChunkID(sum),
 		Size: int64(n),
 	}
 

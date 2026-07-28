@@ -1,7 +1,7 @@
 package domain
 
 type File struct {
-	ID     [32]byte
+	ID     string
 	Name   string
 	Chunks []ChunkID
 }
