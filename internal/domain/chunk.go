@@ -1,9 +1,8 @@
 package domain
 
-import "github.com/google/uuid"
+type ChunkID [32]byte
 
 type Chunk struct {
-	ID       uuid.UUID
-	Size     int64
-	Checksum string
+	ID   ChunkID
+	Size int64
 }
