@@ -13,7 +13,7 @@ func TestMemoryFileRepository(t *testing.T) {
 		t.Error(err)
 	}
 	file := &domain.File{
-		ID:   id.String(),
+		ID:   domain.FileID(id.String()),
 		Name: "Hello,world!",
 	}
 

@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -19,43 +18,62 @@ type FilesystemStore struct {
 	rootDir string
 }
 
-func (s *FilesystemStore) Put(id string, r io.Reader) error {
-	if err := os.MkdirAll(s.chunkPath(id), os.ModePerm); err != nil {
-		return err
+func NewFileSystemStorage(root string) *FilesystemStore {
+	return &FilesystemStore{
+		rootDir: root,
 	}
+}
+
+func (s *FilesystemStore) Put(id string, r io.Reader) error {
 	pathAndFilename := s.getPathAndFileName(id)
 
-	f, err := os.Create(pathAndFilename)
-	defer f.Close()
+	err := os.MkdirAll(
+		filepath.Dir(pathAndFilename),
+		os.ModePerm,
+	)
+
 	if err != nil {
 		return err
 	}
+
+	f, err := os.Create(pathAndFilename)
+
+	if err != nil {
+		return err
+	}
+
+	defer f.Close()
 
 	n, err := io.Copy(f, r)
+
 	if err != nil {
 		return err
 	}
 
-	log.Printf("written (%d) bytes to disk: %s", n, pathAndFilename)
+	log.Printf(
+		"written (%d) bytes to disk: %s",
+		n,
+		pathAndFilename,
+	)
 
 	return nil
 }
 
 func (s *FilesystemStore) Get(id string) (io.Reader, error) {
+
 	if !s.Exists(id) {
 		return nil, FileNotFoundErr
 	}
-	file, err := os.Open(s.getPathAndFileName(id))
-	defer file.Close()
+
+	file, err := os.Open(
+		s.getPathAndFileName(id),
+	)
+
 	if err != nil {
 		return nil, err
 	}
-	buf := new(bytes.Buffer)
-	n, err := io.Copy(buf, file)
 
-	log.Printf("read (%d) bytes from disk: %s", n, s.getPathAndFileName(id))
-
-	return buf, err
+	return file, nil
 }
 
 func (s *FilesystemStore) Delete(id string) error {
@@ -78,13 +96,11 @@ func (s *FilesystemStore) Delete(id string) error {
 }
 
 func (s *FilesystemStore) Exists(id string) bool {
-	_, err := os.Stat(s.getPathAndFileName(id))
+	_, err := os.Stat(
+		s.getPathAndFileName(id),
+	)
 
-	if err == nil {
-		return true
-	}
-
-	return !errors.Is(err, os.ErrNotExist)
+	return err == nil
 }
 
 /**
@@ -106,7 +122,11 @@ func (s *FilesystemStore) chunkPath(id string) string {
  * Returns path + filename
  */
 func (s *FilesystemStore) getPathAndFileName(id string) string {
-	return s.chunkPath(id) + "/" + id
+	return filepath.Join(
+		s.rootDir,
+		s.chunkPath(id),
+		id,
+	)
 }
 
 /**

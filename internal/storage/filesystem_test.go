@@ -10,7 +10,8 @@ import (
 )
 
 func TestFileSystem(t *testing.T) {
-	store := &FilesystemStore{"./"}
+	tempDir := t.TempDir()
+	store := &FilesystemStore{tempDir}
 
 	id := uuid.New().String()
 	content := "Hello, world!"

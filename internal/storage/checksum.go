@@ -1,8 +1,11 @@
 package storage
 
-import "crypto/sha256"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+)
 
 func SHA256(data []byte) string {
 	sha := sha256.Sum256(data)
-	return string(sha[:])
+	return hex.EncodeToString(sha[:])
 }
