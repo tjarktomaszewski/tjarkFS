@@ -7,9 +7,6 @@ import (
 
 	"github.com/tjarktomaszewski/tjarkFS/internal/chunking"
 	"github.com/tjarktomaszewski/tjarkFS/internal/domain"
-	"github.com/tjarktomaszewski/tjarkFS/internal/identity"
-	"github.com/tjarktomaszewski/tjarkFS/internal/metadata"
-	"github.com/tjarktomaszewski/tjarkFS/internal/storage"
 )
 
 type ChunkerFactory func(r io.Reader, chunkSize int64) (*chunking.Chunker, error)
@@ -18,17 +15,17 @@ type UploadService struct {
 	newChunker ChunkerFactory
 	chunkSize  int64
 
-	writer     storage.ChunkWriter
-	repository metadata.FileRepository
+	writer     domain.ChunkWriter
+	repository domain.FileRepository
 
-	idGenerator identity.FileIDGenerator
+	idGenerator domain.FileIDGenerator
 }
 
 func NewUploadService(
 	newChunker ChunkerFactory,
-	writer storage.ChunkWriter,
-	repository metadata.FileRepository,
-	idGenerator identity.FileIDGenerator,
+	writer domain.ChunkWriter,
+	repository domain.FileRepository,
+	idGenerator domain.FileIDGenerator,
 	chunkSize int64,
 ) *UploadService {
 

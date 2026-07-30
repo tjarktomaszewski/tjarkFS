@@ -4,16 +4,14 @@ import (
 	"io"
 
 	"github.com/tjarktomaszewski/tjarkFS/internal/domain"
-	"github.com/tjarktomaszewski/tjarkFS/internal/metadata"
-	"github.com/tjarktomaszewski/tjarkFS/internal/storage"
 )
 
 type DownloadService struct {
-	reader storage.ChunkReader
-	repo   metadata.FileRepository
+	reader domain.ChunkReader
+	repo   domain.FileRepository
 }
 
-func NewDownloadService(reader storage.ChunkReader, repo metadata.FileRepository) *DownloadService {
+func NewDownloadService(reader domain.ChunkReader, repo domain.FileRepository) *DownloadService {
 	return &DownloadService{
 		reader: reader,
 		repo:   repo,

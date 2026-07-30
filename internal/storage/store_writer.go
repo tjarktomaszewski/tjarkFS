@@ -3,10 +3,10 @@ package storage
 import "github.com/tjarktomaszewski/tjarkFS/internal/domain"
 
 type StoreWriter struct {
-	store Store
+	store domain.Store
 }
 
-func NewStoreWriter(store Store) *StoreWriter {
+func NewStoreWriter(store domain.Store) *StoreWriter {
 	return &StoreWriter{
 		store: store,
 	}

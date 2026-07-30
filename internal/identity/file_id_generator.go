@@ -7,10 +7,6 @@ import (
 	"github.com/tjarktomaszewski/tjarkFS/internal/domain"
 )
 
-type FileIDGenerator interface {
-	Generate() (domain.FileID, error)
-}
-
 type UUIDFileIDGenerator struct{}
 
 func (g UUIDFileIDGenerator) Generate() (domain.FileID, error) {

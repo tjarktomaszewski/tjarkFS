@@ -7,10 +7,10 @@ import (
 )
 
 type StoreReader struct {
-	store Store
+	store domain.Store
 }
 
-func NewStoreReader(store Store) *StoreReader {
+func NewStoreReader(store domain.Store) *StoreReader {
 	return &StoreReader{
 		store: store,
 	}
