@@ -35,7 +35,11 @@ func run() error {
 	reader := storage.NewStoreReader(store)
 
 	// Metadata
-	repository := metadata.NewMemoryFileRepository()
+	repository, err := metadata.NewSQLiteFileRepository("./data/tjarkfs.sqlite")
+	if err != nil {
+		return fmt.Errorf("open metadata db: %w", err)
+	}
+	defer repository.Close()
 
 	// File ID generator
 	idGenerator := identity.UUIDFileIDGenerator{}
