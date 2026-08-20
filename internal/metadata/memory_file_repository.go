@@ -2,6 +2,8 @@ package metadata
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"sync"
 
 	"github.com/tjarktomaszewski/tjarkFS/internal/domain"
@@ -36,6 +38,14 @@ func (m *MemoryFileRepository) Get(id domain.FileID) (*domain.File, error) {
 	return &file, nil
 }
 
-func (m *MemoryFileRepository) Delete(id domain.FileID) {
+func (m *MemoryFileRepository) List() ([]domain.File, error) {
+	m.RLock()
+	defer m.RUnlock()
+
+	return slices.Collect(maps.Values(m.files)), nil
+}
+
+func (m *MemoryFileRepository) Delete(id domain.FileID) error {
 	delete(m.files, string(id))
+	return nil
 }

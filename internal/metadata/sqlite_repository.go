@@ -140,12 +140,42 @@ func (r *SQLiteFileRepository) Get(id domain.FileID) (*domain.File, error) {
 	return &file, nil
 }
 
-func (r *SQLiteFileRepository) Delete(id domain.FileID) {
+func (r *SQLiteFileRepository) Delete(id domain.FileID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	_, _ = r.db.Exec(`DELETE FROM file_chunks WHERE file_id = ?`, string(id))
-	_, _ = r.db.Exec(`DELETE FROM files WHERE id = ?`, string(id))
+	_, err := r.db.Exec(`DELETE FROM file_chunks WHERE file_id = ?`, string(id))
+	if err != nil {
+		return err
+	}
+	_, err = r.db.Exec(`DELETE FROM files WHERE id = ?`, string(id))
+	return err
+}
+
+func (r *SQLiteFileRepository) List() ([]domain.File, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	rows, err := r.db.Query(`SELECT id, name, size FROM files`)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("no files found in sqlite repository")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("query file list: %w", err)
+	}
+	files := make([]domain.File, 0)
+
+	for rows.Next() {
+		var f domain.File
+
+		err = rows.Scan(&f.ID, &f.Name, &f.Size)
+		if err != nil {
+			return nil, fmt.Errorf("error scanning file: %w", err)
+		}
+		files = append(files, f)
+	}
+
+	return files, nil
 }
 
 func (r *SQLiteFileRepository) Close() error {
