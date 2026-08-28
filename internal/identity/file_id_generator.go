@@ -1,20 +1,33 @@
 package identity
 
 import (
-	"fmt"
+	"log/slog"
 
 	"github.com/google/uuid"
 	"github.com/tjarktomaszewski/tjarkFS/internal/domain"
 )
 
-type UUIDFileIDGenerator struct{}
+// UUIDFileIDGenerator generates random UUIDv4 file IDs.
+type UUIDFileIDGenerator struct {
+	logger *slog.Logger
+}
 
-func (g UUIDFileIDGenerator) Generate() (domain.FileID, error) {
-	uuid, err := uuid.NewUUID()
-	if err != nil {
-		return domain.FileID(uuid.String()), err
+// NewUUIDFileIDGenerator returns a UUIDFileIDGenerator that logs each
+// generated ID using logger. A nil logger falls back to slog.Default().
+func NewUUIDFileIDGenerator(logger *slog.Logger) *UUIDFileIDGenerator {
+	if logger == nil {
+		logger = slog.Default()
 	}
-	fmt.Printf("generated file id: %x\n", uuid.String())
+	return &UUIDFileIDGenerator{logger: logger}
+}
 
-	return domain.FileID(uuid.String()), nil
+func (g *UUIDFileIDGenerator) Generate() (domain.FileID, error) {
+	id, err := uuid.NewUUID()
+	if err != nil {
+		return domain.FileID(""), err
+	}
+
+	g.logger.Info("generated file id", "id", id.String())
+
+	return domain.FileID(id.String()), nil
 }

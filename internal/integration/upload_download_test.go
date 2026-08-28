@@ -2,6 +2,8 @@ package integration_test
 
 import (
 	"bytes"
+	"log/slog"
+	"slices"
 	"testing"
 
 	"github.com/tjarktomaszewski/tjarkFS/internal/chunking"
@@ -35,7 +37,7 @@ func TestUploadDownload(t *testing.T) {
 
 	// Identity
 
-	idGenerator := identity.UUIDFileIDGenerator{}
+	idGenerator := identity.NewUUIDFileIDGenerator(slog.Default())
 
 	// Services
 
@@ -98,5 +100,96 @@ func TestUploadDownload(t *testing.T) {
 		t.Fatalf(
 			"downloaded data differs from uploaded data",
 		)
+	}
+}
+
+// TestUploadDownloadDeleteSharedChunks verifies that deleting one file does
+// not remove chunks that are still referenced by another file with identical
+// content (deduplication), and that the chunk is only physically removed
+// when its last reference is gone.
+func TestUploadDownloadDeleteSharedChunks(t *testing.T) {
+	input := []byte(
+		"This content is uploaded twice, so both files " +
+			"share the same chunks.",
+	)
+
+	tempDir := t.TempDir()
+
+	store := storage.NewFileSystemStorage(tempDir)
+	writer := storage.NewStoreWriter(store)
+	reader := storage.NewStoreReader(store)
+
+	repository := metadata.NewMemoryFileRepository()
+
+	idGenerator := identity.NewUUIDFileIDGenerator(slog.Default())
+
+	uploadService := service.NewUploadService(
+		chunking.NewChunker,
+		writer,
+		repository,
+		idGenerator,
+		10, // kleine Chunks für Test
+	)
+	downloadService := service.NewDownloadService(reader, repository)
+	deleteService := service.NewDeleteService(
+		repository,
+		storage.NewStoreRemover(store),
+	)
+
+	// Upload the same content under two names; both files must end up with
+	// the identical chunk list.
+	first, err := uploadService.Upload(bytes.NewReader(input), "first.txt")
+	if err != nil {
+		t.Fatalf("upload first: %v", err)
+	}
+	second, err := uploadService.Upload(bytes.NewReader(input), "second.txt")
+	if err != nil {
+		t.Fatalf("upload second: %v", err)
+	}
+
+	if len(first.Chunks) < 2 {
+		t.Fatalf("expected multiple chunks, got %d", len(first.Chunks))
+	}
+	if !slices.Equal(first.Chunks, second.Chunks) {
+		t.Fatalf("expected identical chunk lists, got %v and %v", first.Chunks, second.Chunks)
+	}
+
+	// Delete the first file: the chunks must remain on disk for the second.
+	if err := deleteService.Delete(first.ID); err != nil {
+		t.Fatalf("delete first: %v", err)
+	}
+
+	for _, chunkID := range first.Chunks {
+		ok, err := store.Exists(string(chunkID))
+		if err != nil {
+			t.Fatalf("exists check: %v", err)
+		}
+		if !ok {
+			t.Fatalf("chunk %x removed although still referenced by the second file", chunkID)
+		}
+	}
+
+	// The second file must still be fully downloadable.
+	var out bytes.Buffer
+	if err := downloadService.Download(second.ID, &out); err != nil {
+		t.Fatalf("download second after shared delete: %v", err)
+	}
+	if !bytes.Equal(input, out.Bytes()) {
+		t.Fatal("second file content differs after shared delete")
+	}
+
+	// Delete the second file: the chunks can finally be removed.
+	if err := deleteService.Delete(second.ID); err != nil {
+		t.Fatalf("delete second: %v", err)
+	}
+
+	for _, chunkID := range first.Chunks {
+		ok, err := store.Exists(string(chunkID))
+		if err != nil {
+			t.Fatalf("exists check: %v", err)
+		}
+		if ok {
+			t.Fatalf("chunk %x still present after its last file was deleted", chunkID)
+		}
 	}
 }

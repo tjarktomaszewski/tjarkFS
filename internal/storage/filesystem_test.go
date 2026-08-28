@@ -16,24 +16,44 @@ func TestFileSystem(t *testing.T) {
 	id := uuid.New().String()
 	content := "Hello, world!"
 	reader := strings.NewReader(content)
-	store.Put(id, reader)
 
-	if !store.Exists(id) {
-		t.Errorf("%s does not exists, expected it to exist", id)
+	if err := store.Put(id, reader); err != nil {
+		t.Fatalf("put failed: %v", err)
 	}
+
+	exists, err := store.Exists(id)
+	if err != nil {
+		t.Fatalf("exists failed: %v", err)
+	}
+	if !exists {
+		t.Errorf("%s does not exist, expected it to exist", id)
+	}
+
 	f, err := store.Get(id)
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
-	b, _ := io.ReadAll(f)
+	defer f.Close()
+
+	b, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("read failed: %v", err)
+	}
 
 	if string(b) != content {
 		t.Errorf("expected %s, got %s", content, string(b))
 	}
 	fmt.Printf("file content: %s", string(b))
 
-	store.Delete(id)
-	if store.Exists(id) {
+	if err := store.Delete(id); err != nil {
+		t.Fatalf("delete failed: %v", err)
+	}
+
+	exists, err = store.Exists(id)
+	if err != nil {
+		t.Fatalf("exists failed: %v", err)
+	}
+	if exists {
 		t.Errorf("%s does exist, expected it to not exist", id)
 	}
 }

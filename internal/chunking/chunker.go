@@ -12,6 +12,9 @@ import (
 type Chunker struct {
 	chunkSize int64
 	reader    io.Reader
+	// buf is reused for every chunk to avoid allocating a fresh
+	// chunkSize-sized buffer per chunk.
+	buf []byte
 }
 
 func NewChunker(r io.Reader, chunkSize int64) (*Chunker, error) {
@@ -22,12 +25,16 @@ func NewChunker(r io.Reader, chunkSize int64) (*Chunker, error) {
 	return &Chunker{
 		reader:    r,
 		chunkSize: chunkSize,
+		buf:       make([]byte, chunkSize),
 	}, nil
 }
 
+// Next reads the next chunk from the underlying reader.
+//
+// The returned ChunkStream's Reader aliases the chunker's internal buffer:
+// it must be fully consumed before Next is called again.
 func (c *Chunker) Next() (*domain.ChunkStream, error) {
-	buf := make([]byte, c.chunkSize)
-	n, err := io.ReadFull(c.reader, buf)
+	n, err := io.ReadFull(c.reader, c.buf)
 
 	if err != nil {
 		if errors.Is(err, io.EOF) {
@@ -41,7 +48,8 @@ func (c *Chunker) Next() (*domain.ChunkStream, error) {
 	if n == 0 {
 		return nil, io.EOF
 	}
-	buf = buf[:n]
+
+	buf := c.buf[:n]
 	sum := storage.SHA256(buf)
 	chunk := domain.Chunk{
 		ID:   domain.ChunkID(sum),
@@ -49,9 +57,7 @@ func (c *Chunker) Next() (*domain.ChunkStream, error) {
 	}
 
 	return &domain.ChunkStream{
-		Chunk: chunk,
-		Reader: bytes.NewReader(
-			buf,
-		),
+		Chunk:  chunk,
+		Reader: bytes.NewReader(buf),
 	}, nil
 }

@@ -17,10 +17,7 @@ func NewStoreReader(store domain.Store) *StoreReader {
 }
 
 func (r *StoreReader) Read(id domain.ChunkID) (io.ReadCloser, error) {
-	reader, err := r.store.Get(string(id[:]))
-	if err != nil {
-		return nil, err
-	}
-
-	return io.NopCloser(reader), nil
+	// The store returns an open file (io.ReadCloser) directly; the caller
+	// owns the file descriptor and must close it after consuming the chunk.
+	return r.store.Get(string(id[:]))
 }

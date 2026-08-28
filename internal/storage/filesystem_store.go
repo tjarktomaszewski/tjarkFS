@@ -1,9 +1,9 @@
 package storage
 
 import (
-	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	FileNotFoundErr = errors.New("file not found")
+	FileNotFoundErr = fs.ErrNotExist
 )
 
 type FilesystemStore struct {
@@ -25,51 +25,60 @@ func NewFileSystemStorage(root string) *FilesystemStore {
 }
 
 func (s *FilesystemStore) Put(id string, r io.Reader) error {
-	pathAndFilename := s.getPathAndFileName(id)
+	target := s.getPathAndFileName(id)
+	dir := filepath.Dir(target)
 
-	err := os.MkdirAll(
-		filepath.Dir(pathAndFilename),
-		os.ModePerm,
-	)
-
-	if err != nil {
-		return err
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create directory %s: %w", dir, err)
 	}
 
-	f, err := os.Create(pathAndFilename)
-
+	// Write to a temporary file in the target directory first, then rename
+	// it atomically onto the final path. This guarantees the target path
+	// never points at a partially written chunk and protects against
+	// concurrent writers of the same (content-addressed) chunk ID.
+	tmp, err := os.CreateTemp(dir, filepath.Base(target)+".tmp-*")
 	if err != nil {
-		return err
+		return fmt.Errorf("create temp file for %s: %w", target, err)
+	}
+	tmpPath := tmp.Name()
+	// Removes the temp file on any error path; a no-op after a successful rename.
+	defer os.Remove(tmpPath)
+
+	n, err := io.Copy(tmp, r)
+	if err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write chunk %s: %w", id, err)
 	}
 
-	defer f.Close()
+	// On *os.File, write errors (e.g. a full disk) often only surface
+	// during Sync or Close, so both must be checked explicitly.
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("sync chunk %s: %w", id, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close chunk %s: %w", id, err)
+	}
 
-	n, err := io.Copy(f, r)
-
-	if err != nil {
-		return err
+	if err := os.Rename(tmpPath, target); err != nil {
+		return fmt.Errorf("rename chunk %s: %w", id, err)
 	}
 
 	log.Printf(
 		"written (%d) bytes to disk: %s",
 		n,
-		pathAndFilename,
+		target,
 	)
 
 	return nil
 }
 
-func (s *FilesystemStore) Get(id string) (io.Reader, error) {
-
-	if !s.Exists(id) {
-		return nil, FileNotFoundErr
-	}
-
-	file, err := os.Open(
-		s.getPathAndFileName(id),
-	)
-
+func (s *FilesystemStore) Get(id string) (io.ReadCloser, error) {
+	file, err := os.Open(s.getPathAndFileName(id))
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, FileNotFoundErr
+		}
 		return nil, err
 	}
 
@@ -77,35 +86,35 @@ func (s *FilesystemStore) Get(id string) (io.Reader, error) {
 }
 
 func (s *FilesystemStore) Delete(id string) error {
-	if !s.Exists(id) {
-		return FileNotFoundErr
-	}
-	err := os.Remove(s.getPathAndFileName(id))
+	exists, err := s.Exists(id)
 	if err != nil {
-		log.Print(err.Error())
 		return err
 	}
-	currentDir := filepath.Dir(s.getPathAndFileName(id))
-
-	err = s.removeEmptyDirRecursive(currentDir)
-	if err != nil {
-		return nil
+	if !exists {
+		return FileNotFoundErr
 	}
 
-	return nil
+	path := s.getPathAndFileName(id)
+	if err := os.Remove(path); err != nil {
+		return fmt.Errorf("remove %s: %w", path, err)
+	}
+
+	return s.removeEmptyDirRecursive(filepath.Dir(path))
 }
 
-func (s *FilesystemStore) Exists(id string) bool {
-	_, err := os.Stat(
-		s.getPathAndFileName(id),
-	)
+func (s *FilesystemStore) Exists(id string) (bool, error) {
+	_, err := os.Stat(s.getPathAndFileName(id))
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
 
-	return err == nil
+	return false, err
 }
 
-/**
- * Creates file path based on given id
- */
+// Creates file path based on given id
 func (s *FilesystemStore) chunkPath(id string) string {
 	blockSize := 4
 	sliceLen := len(id) / blockSize
@@ -118,9 +127,7 @@ func (s *FilesystemStore) chunkPath(id string) string {
 	return strings.Join(paths, "/")
 }
 
-/**
- * Returns path + filename
- */
+// Returns path + filename
 func (s *FilesystemStore) getPathAndFileName(id string) string {
 	return filepath.Join(
 		s.rootDir,
@@ -129,11 +136,10 @@ func (s *FilesystemStore) getPathAndFileName(id string) string {
 	)
 }
 
-/**
- * Removes given directory and all empty parent directories
- */
+// Removes the given directory and all empty parent directories, stopping
+// (without removing) at rootDir so the store root itself is never deleted.
 func (s *FilesystemStore) removeEmptyDirRecursive(dir string) error {
-	for {
+	for dir != s.rootDir {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			return fmt.Errorf("failed to read directory %s: %w", dir, err)
@@ -142,15 +148,12 @@ func (s *FilesystemStore) removeEmptyDirRecursive(dir string) error {
 			break
 		}
 
-		if err = os.Remove(dir); err != nil {
-			return fmt.Errorf("failed to remove empty directory %s: %s", dir, err)
+		if err := os.Remove(dir); err != nil {
+			return fmt.Errorf("failed to remove empty directory %s: %w", dir, err)
 		}
 
-		nextDir := filepath.Dir(dir)
-		if nextDir == dir {
-			break
-		}
-		dir = nextDir
+		dir = filepath.Dir(dir)
 	}
+
 	return nil
 }
