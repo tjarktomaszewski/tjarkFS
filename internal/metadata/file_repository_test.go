@@ -122,6 +122,7 @@ func TestSQLiteFileRepository(t *testing.T) {
 type testFileRepository interface {
 	Save(file domain.File) error
 	Get(id domain.FileID) (*domain.File, error)
+	List() ([]domain.File, error)
 	Delete(id domain.FileID) ([]domain.ChunkID, error)
 }
 
@@ -144,12 +145,12 @@ func TestFileRepositoryChunkRefCounts(t *testing.T) {
 			name: "sqlite",
 			new: func(t *testing.T) testFileRepository {
 				repo, err := NewSQLiteFileRepository(filepath.Join(t.TempDir(), "test.sqlite"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = repo.Close() })
-			return repo
-		},
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = repo.Close() })
+				return repo
+			},
 		},
 	}
 
@@ -213,6 +214,56 @@ func TestFileRepositoryChunkRefCounts(t *testing.T) {
 			sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
 			if len(sorted) != 2 || sorted[0] != "c1" || sorted[1] != "c2" {
 				t.Errorf("expected [c1 c2] to be unreferenced, got %v", unreferenced)
+			}
+		})
+	}
+}
+
+// TestFileRepositoryListIncludesChunks verifies that List returns the
+// complete files including their chunk references, for both repository
+// implementations.
+func TestFileRepositoryListIncludesChunks(t *testing.T) {
+	tests := []struct {
+		name string
+		new  func(t *testing.T) testFileRepository
+	}{
+		{
+			name: "memory",
+			new:  func(t *testing.T) testFileRepository { return NewMemoryFileRepository() },
+		},
+		{
+			name: "sqlite",
+			new: func(t *testing.T) testFileRepository {
+				repo, err := NewSQLiteFileRepository(filepath.Join(t.TempDir(), "test.sqlite"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = repo.Close() })
+				return repo
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := tt.new(t)
+
+			f := domain.File{ID: "x", Name: "x.txt", Size: 10, Chunks: []domain.ChunkID{"c1", "c2", "c1"}}
+			if err := repo.Save(f); err != nil {
+				t.Fatal(err)
+			}
+
+			files, err := repo.List()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(files) != 1 {
+				t.Fatalf("expected 1 file, got %d", len(files))
+			}
+			// Note: List returns all chunk rows (a chunk may appear at
+			// multiple positions); reference counting uses distinctChunkIDs.
+			if len(files[0].Chunks) != len(f.Chunks) {
+				t.Errorf("expected %d chunk rows, got %v", len(f.Chunks), files[0].Chunks)
 			}
 		})
 	}

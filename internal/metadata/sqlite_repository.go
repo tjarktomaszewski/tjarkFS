@@ -295,6 +295,33 @@ func (r *SQLiteFileRepository) List() ([]domain.File, error) {
 		return nil, fmt.Errorf("iterate file list: %w", err)
 	}
 
+	// Load the chunk references for all files in a single query
+	// (grouped per file, ordered by position).
+	chunkRows, err := r.db.Query(
+		`SELECT file_id, chunk_id FROM file_chunks ORDER BY file_id, position`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query file chunks: %w", err)
+	}
+	defer chunkRows.Close()
+
+	chunksByFile := make(map[domain.FileID][]domain.ChunkID)
+	for chunkRows.Next() {
+		var fileID domain.FileID
+		var chunkID domain.ChunkID
+		if err := chunkRows.Scan(&fileID, &chunkID); err != nil {
+			return nil, fmt.Errorf("scan file chunk: %w", err)
+		}
+		chunksByFile[fileID] = append(chunksByFile[fileID], chunkID)
+	}
+	if err := chunkRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate file chunks: %w", err)
+	}
+
+	for i := range files {
+		files[i].Chunks = chunksByFile[files[i].ID]
+	}
+
 	return files, nil
 }
 
