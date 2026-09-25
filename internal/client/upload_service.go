@@ -1,15 +1,15 @@
-package service
+package client
 
 import (
 	"errors"
 	"fmt"
 	"io"
 
-	"github.com/tjarktomaszewski/tjarkFS/internal/chunking"
+	"github.com/tjarktomaszewski/tjarkFS/internal/chunker"
 	"github.com/tjarktomaszewski/tjarkFS/internal/domain"
 )
 
-type ChunkerFactory func(r io.Reader, chunkSize int64) (*chunking.Chunker, error)
+type ChunkerFactory func(r io.Reader, chunkSize int64) (*chunker.Chunker, error)
 
 type UploadService struct {
 	newChunker ChunkerFactory

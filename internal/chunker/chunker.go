@@ -1,4 +1,4 @@
-package chunking
+package chunker
 
 import (
 	"bytes"
@@ -6,7 +6,6 @@ import (
 	"io"
 
 	"github.com/tjarktomaszewski/tjarkFS/internal/domain"
-	"github.com/tjarktomaszewski/tjarkFS/internal/storage"
 )
 
 type Chunker struct {
@@ -50,7 +49,7 @@ func (c *Chunker) Next() (*domain.ChunkStream, error) {
 	}
 
 	buf := c.buf[:n]
-	sum := storage.SHA256(buf)
+	sum := SHA256(buf)
 	chunk := domain.Chunk{
 		ID:   domain.ChunkID(sum),
 		Size: int64(n),

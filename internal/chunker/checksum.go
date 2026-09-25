@@ -1,4 +1,4 @@
-package storage
+package chunker
 
 import (
 	"crypto/sha256"

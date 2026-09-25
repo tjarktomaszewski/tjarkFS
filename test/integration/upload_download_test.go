@@ -1,4 +1,4 @@
-package integration_test
+package integration
 
 import (
 	"bytes"
@@ -6,11 +6,11 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/tjarktomaszewski/tjarkFS/internal/chunking"
+	"github.com/tjarktomaszewski/tjarkFS/internal/chunker"
+	"github.com/tjarktomaszewski/tjarkFS/internal/client"
+	"github.com/tjarktomaszewski/tjarkFS/internal/controlplane/metadata"
 	"github.com/tjarktomaszewski/tjarkFS/internal/identity"
-	"github.com/tjarktomaszewski/tjarkFS/internal/metadata"
-	"github.com/tjarktomaszewski/tjarkFS/internal/service"
-	"github.com/tjarktomaszewski/tjarkFS/internal/storage"
+	"github.com/tjarktomaszewski/tjarkFS/internal/storagenode/store"
 )
 
 func TestUploadDownload(t *testing.T) {
@@ -23,13 +23,13 @@ func TestUploadDownload(t *testing.T) {
 
 	// Storage
 
-	store := storage.NewFileSystemStorage(
+	chunkStore := store.NewFileSystemStorage(
 		tempDir,
 	)
 	t.Logf("storage directory: %s", tempDir)
-	writer := storage.NewStoreWriter(store)
+	writer := store.NewStoreWriter(chunkStore)
 
-	reader := storage.NewStoreReader(store)
+	reader := store.NewStoreReader(chunkStore)
 
 	// Metadata
 
@@ -41,15 +41,15 @@ func TestUploadDownload(t *testing.T) {
 
 	// Services
 
-	uploadService := service.NewUploadService(
-		chunking.NewChunker,
+	uploadService := client.NewUploadService(
+		chunker.NewChunker,
 		writer,
 		repository,
 		idGenerator,
 		10, // kleine Chunks für Test
 	)
 
-	downloadService := service.NewDownloadService(
+	downloadService := client.NewDownloadService(
 		reader,
 		repository,
 	)
@@ -115,25 +115,25 @@ func TestUploadDownloadDeleteSharedChunks(t *testing.T) {
 
 	tempDir := t.TempDir()
 
-	store := storage.NewFileSystemStorage(tempDir)
-	writer := storage.NewStoreWriter(store)
-	reader := storage.NewStoreReader(store)
+	chunkStore := store.NewFileSystemStorage(tempDir)
+	writer := store.NewStoreWriter(chunkStore)
+	reader := store.NewStoreReader(chunkStore)
 
 	repository := metadata.NewMemoryFileRepository()
 
 	idGenerator := identity.NewUUIDFileIDGenerator(slog.Default())
 
-	uploadService := service.NewUploadService(
-		chunking.NewChunker,
+	uploadService := client.NewUploadService(
+		chunker.NewChunker,
 		writer,
 		repository,
 		idGenerator,
 		10, // kleine Chunks für Test
 	)
-	downloadService := service.NewDownloadService(reader, repository)
-	deleteService := service.NewDeleteService(
+	downloadService := client.NewDownloadService(reader, repository)
+	deleteService := client.NewDeleteService(
 		repository,
-		storage.NewStoreRemover(store),
+		store.NewStoreRemover(chunkStore),
 	)
 
 	// Upload the same content under two names; both files must end up with
@@ -160,7 +160,7 @@ func TestUploadDownloadDeleteSharedChunks(t *testing.T) {
 	}
 
 	for _, chunkID := range first.Chunks {
-		ok, err := store.Exists(string(chunkID))
+		ok, err := chunkStore.Exists(string(chunkID))
 		if err != nil {
 			t.Fatalf("exists check: %v", err)
 		}
@@ -184,7 +184,7 @@ func TestUploadDownloadDeleteSharedChunks(t *testing.T) {
 	}
 
 	for _, chunkID := range first.Chunks {
-		ok, err := store.Exists(string(chunkID))
+		ok, err := chunkStore.Exists(string(chunkID))
 		if err != nil {
 			t.Fatalf("exists check: %v", err)
 		}

@@ -8,11 +8,11 @@ import (
 	"strconv"
 
 	"github.com/spf13/cobra"
-	"github.com/tjarktomaszewski/tjarkFS/internal/chunking"
+	"github.com/tjarktomaszewski/tjarkFS/internal/chunker"
+	"github.com/tjarktomaszewski/tjarkFS/internal/client"
+	"github.com/tjarktomaszewski/tjarkFS/internal/controlplane/metadata"
 	"github.com/tjarktomaszewski/tjarkFS/internal/identity"
-	"github.com/tjarktomaszewski/tjarkFS/internal/metadata"
-	"github.com/tjarktomaszewski/tjarkFS/internal/service"
-	"github.com/tjarktomaszewski/tjarkFS/internal/storage"
+	"github.com/tjarktomaszewski/tjarkFS/internal/storagenode/store"
 )
 
 var (
@@ -25,10 +25,10 @@ var (
 // Metadaten-DB und die vier Services.
 type app struct {
 	repository *metadata.SQLiteFileRepository
-	upload     *service.UploadService
-	download   *service.DownloadService
-	list       *service.ListService
-	deleteSvc  *service.DeleteService
+	upload     *client.UploadService
+	download   *client.DownloadService
+	list       *client.ListService
+	deleteSvc  *client.DeleteService
 }
 
 // Close gibt die Metadaten-DB frei.
@@ -58,10 +58,10 @@ func newApp() (*app, error) {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
 
-	store := storage.NewFileSystemStorage(dataDir)
-	writer := storage.NewStoreWriter(store)
-	reader := storage.NewStoreReader(store)
-	remover := storage.NewStoreRemover(store)
+	chunkStore := store.NewFileSystemStorage(dataDir)
+	writer := store.NewStoreWriter(chunkStore)
+	reader := store.NewStoreReader(chunkStore)
+	remover := store.NewStoreRemover(chunkStore)
 
 	repository, err := metadata.NewSQLiteFileRepository(filepath.Join(dataDir, "tjarkfs.sqlite"))
 	if err != nil {
@@ -72,10 +72,10 @@ func newApp() (*app, error) {
 
 	return &app{
 		repository: repository,
-		upload:     service.NewUploadService(chunking.NewChunker, writer, repository, idGenerator, chunkSize),
-		download:   service.NewDownloadService(reader, repository),
-		list:       service.NewListService(repository),
-		deleteSvc:  service.NewDeleteService(repository, remover),
+		upload:     client.NewUploadService(chunker.NewChunker, writer, repository, idGenerator, chunkSize),
+		download:   client.NewDownloadService(reader, repository),
+		list:       client.NewListService(repository),
+		deleteSvc:  client.NewDeleteService(repository, remover),
 	}, nil
 }
 

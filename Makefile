@@ -1,18 +1,17 @@
 run:
-	@echo Run tjarkfs
-	@go run ./cmd/tjarkfs $(ARGS)
+	@go run ./cmd/client $(ARGS)
 
 build:
-	@echo Build tjarkfs
 	@mkdir -p bin
-	@go build -o bin/tjarkfs ./cmd/tjarkfs
+	@go build -o bin/tjarkfs ./cmd/client
 
 test:
-	@echo Run tests
 	@go test ./... -cover
 
 test-race:
-	@echo Run tests
 	@go test ./... -cover -race
+
+# proto/sqlc/up/chaos/bench laut docs/STRUCTURE.md, sobald die jeweiligen
+# Komponenten (buf, sqlc, docker-compose, test/chaos, bench/) existieren.
 
 .PHONY: run build test test-race
