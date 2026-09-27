@@ -58,7 +58,7 @@ func newApp() (*app, error) {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
 
-	chunkStore := store.NewFileSystemStorage(dataDir)
+	chunkStore := store.NewFileSystemStorage(dataDir, logger)
 	writer := store.NewStoreWriter(chunkStore)
 	reader := store.NewStoreReader(chunkStore)
 	remover := store.NewStoreRemover(chunkStore)
