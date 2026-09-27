@@ -25,6 +25,7 @@ func TestUploadDownload(t *testing.T) {
 
 	chunkStore := store.NewFileSystemStorage(
 		tempDir,
+		nil,
 	)
 	t.Logf("storage directory: %s", tempDir)
 	writer := store.NewStoreWriter(chunkStore)
@@ -115,7 +116,7 @@ func TestUploadDownloadDeleteSharedChunks(t *testing.T) {
 
 	tempDir := t.TempDir()
 
-	chunkStore := store.NewFileSystemStorage(tempDir)
+	chunkStore := store.NewFileSystemStorage(tempDir, nil)
 	writer := store.NewStoreWriter(chunkStore)
 	reader := store.NewStoreReader(chunkStore)
 

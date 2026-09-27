@@ -11,7 +11,7 @@ import (
 
 func TestFileSystem(t *testing.T) {
 	tempDir := t.TempDir()
-	store := &FilesystemStore{tempDir}
+	store := NewFileSystemStorage(tempDir, nil)
 
 	id := uuid.New().String()
 	content := "Hello, world!"

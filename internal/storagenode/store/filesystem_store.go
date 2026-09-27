@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,11 +16,16 @@ var (
 
 type FilesystemStore struct {
 	rootDir string
+	logger  *slog.Logger
 }
 
-func NewFileSystemStorage(root string) *FilesystemStore {
+func NewFileSystemStorage(root string, logger *slog.Logger) *FilesystemStore {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &FilesystemStore{
 		rootDir: root,
+		logger:  logger,
 	}
 }
 
@@ -64,10 +69,10 @@ func (s *FilesystemStore) Put(id string, r io.Reader) error {
 		return fmt.Errorf("rename chunk %s: %w", id, err)
 	}
 
-	log.Printf(
-		"written (%d) bytes to disk: %s",
-		n,
-		target,
+	s.logger.Info(
+		"written chunk to disk",
+		"bytes", n,
+		"target", target,
 	)
 
 	return nil
