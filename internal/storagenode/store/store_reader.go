@@ -19,5 +19,5 @@ func NewStoreReader(store domain.Store) *StoreReader {
 func (r *StoreReader) Read(id domain.ChunkID) (io.ReadCloser, error) {
 	// The store returns an open file (io.ReadCloser) directly; the caller
 	// owns the file descriptor and must close it after consuming the chunk.
-	return r.store.Get(string(id[:]))
+	return r.store.Get(string(id))
 }

@@ -14,5 +14,5 @@ func NewStoreWriter(store domain.Store) *StoreWriter {
 
 func (w *StoreWriter) Write(stream *domain.ChunkStream) error {
 	id := stream.Chunk.ID
-	return w.store.Put(string(id[:]), stream.Reader)
+	return w.store.Put(string(id), stream.Reader)
 }

@@ -67,7 +67,7 @@ func (u *UploadService) Upload(r io.Reader, name string) (*domain.File, error) {
 
 		if err := u.writer.Write(stream); err != nil {
 			// TODO: Later implement cleanup on failed uploads
-			return nil, fmt.Errorf("chunk %x written: %w", stream.Chunk.ID, err)
+			return nil, fmt.Errorf("chunk %s written: %w", stream.Chunk.ID, err)
 		}
 		file.Chunks = append(file.Chunks, stream.Chunk.ID)
 		file.Size += stream.Chunk.Size

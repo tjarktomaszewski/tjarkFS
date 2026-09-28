@@ -1,0 +1,185 @@
+syntax = "proto3";
+
+package tjarkfs.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/tjarktomaszewski/tjarkFS/gen/proto/tjarkfs/v1;tjarkfs";
+
+// ControlPlane: Nur Metadaten, leitet nie Chunk-Daten durch.
+service ControlPlane {
+  // Datei anlegen, Status UPLOADING (vor dem ersten Chunk).
+  rpc CreateFile(CreateFileRequest) returns (CreateFileResponse);
+  // Upload abschließen -> COMMITTED (transaktional).
+  rpc CompleteFile(CompleteFileRequest) returns (CompleteFileResponse);
+  // Metadaten + Chunk-Pläne holen. NOT_FOUND auf UPLOADING.
+  rpc GetFile(GetFileRequest) returns (GetFileResponse);
+  // Replica-Ziele der nächsten Chunks, pro Position.
+  rpc GetChunkPlan(GetChunkPlanRequest) returns (GetChunkPlanResponse);
+  // Dateiliste.
+  rpc ListFiles(ListFilesRequest) returns (ListFilesResponse);
+  // Datei + RefCounts löschen.
+  rpc DeleteFile(DeleteFileRequest) returns (DeleteFileResponse);
+  // StorageNode -> Controlplane, alle 5s. Erster Call = Registrierung.
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  rpc AbortFile(AbortFileRequest) returns (AbortFileResponse);
+  rpc AcquireLease(AcquireLeaseRequest) returns(LeaseGrant);
+  rpc RenewLease(RenewLeaseRequest) returns(LeaseGrant);
+  rpc ReleaseLease(ReleaseLeaseRequest) returns(ReleaseLeaseResponse);
+  rpc MarkChunkCorrupt(MarkChunkCorruptRequest) returns(MarkChunkCorruptResponse);
+  rpc ListNodes(ListNodesRequest) returns(ListNodesResponse);
+
+}
+
+message CreateFileRequest {
+  string name = 1; // Dateiname/Pfad im FS
+  int64 size = 2;  // erwartete Gesamtgröße, 0 = unbekannt
+}
+
+message CreateFileResponse {
+  string file_id = 1; // vom Controlplane generiert
+  int64 chunk_size = 2;
+  FileState state = 3; // UPLOADING
+  repeated ChunkPlacement chunk_plan = 4; // komplett, wenn size > 0
+}
+
+message CompleteFileRequest {
+  string file_id = 1;
+  int64 size = 2; // tatsächliche Gesamtgröße
+  repeated ChunkRef chunks = 3; // in Positionreihenfolge
+  int64 fence_token = 4;
+  repeated string replica_nodes = 5;
+}
+
+message CompleteFileResponse {
+  string file_id = 1;
+  FileState state = 2; // COMMITTED
+}
+
+message GetFileRequest { string file_id = 1; }
+
+message GetFileResponse { File file = 1; }
+
+message AbortFileRequest {
+    string file_id = 1;
+}
+
+message AbortFileResponse {
+    string file_id = 1;
+}
+
+message AcquireLeaseRequest {
+    string file_id = 1;
+    string holder = 2;
+    int64 ttl_seconds = 3;
+}
+
+message RenewLeaseRequest {
+    string file_id = 1;
+    int64 fence_token = 2;
+    int64 ttl_seconds = 3;
+}
+
+message ReleaseLeaseRequest {
+    string file_id = 1;
+    int64 fence_token = 2;
+}
+message ReleaseLeaseResponse{}
+
+message LeaseGrant {
+    string file_id = 1;
+    int64 fence_token = 2;
+    google.protobuf.Timestamp expires_at = 3;
+    int64 chunk_size = 4;
+    repeated ChunkPlacement chunk_plan = 5;
+}
+
+message MarkChunkCorruptRequest {
+    string chunk_id = 1;
+    string node_id = 2;
+}
+message MarkChunkCorruptResponse{}
+
+message ListNodesRequest {}
+
+message ListNodesResponse {
+    repeated Node nodes = 1;
+}
+
+message Node {
+    string node_id = 1;
+    string address = 2;
+    int64 capacity = 3;
+    int64 used = 4;
+    int64 chunk_count = 5;
+    NodeState state = 6;
+    google.protobuf.Timestamp last_heartbeat = 7;
+}
+
+message File {
+  string id = 1;
+  string name = 2;
+  int64 size = 3;
+  FileState state = 4;
+  google.protobuf.Timestamp created_at = 5;
+  repeated ChunkRef chunks = 6; // in Positionreihenfolge
+  int64 fence_token = 7;
+}
+
+message ChunkRef {
+  string chunk_id = 1; // 64-hex (SHA256)
+  int64 size = 2;
+  repeated string replicas = 3; // host:port der StorageNodes
+}
+
+message GetChunkPlanRequest {
+  string file_id = 1;
+  int64 from_position = 2; // 0 = von Anfang
+  int64 count = 3;         // 0 = Rest der Datei
+}
+
+message ChunkPlacement {
+  int64 position = 1;
+  int64 chunk_size = 2;      // letztes Chunk evtl. kleiner
+  repeated string replicas = 3; // [0] = Primär-Node
+}
+
+message GetChunkPlanResponse { repeated ChunkPlacement placements = 1; }
+
+message ListFilesRequest {
+  string page_token = 1;
+  int32 page_size = 2;
+}
+
+message ListFilesResponse {
+  repeated File files = 1;
+  string next_page_token = 2;
+}
+
+message DeleteFileRequest { string file_id = 1; }
+
+message DeleteFileResponse { string file_id = 1; }
+
+message HeartbeatRequest {
+  string node_id = 1;
+  string address = 2; // host:port, falls gewechselt
+  int64 capacity = 3;
+  int64 used = 4;
+  int64 chunk_count = 5;
+}
+
+message HeartbeatResponse { NodeState state = 1; }
+
+enum FileState {
+  FILE_STATE_UNSPECIFIED = 0;
+  FILE_STATE_UPLOADING = 1; // reserviert, noch nicht lesbar
+  FILE_STATE_COMMITTED = 2; // vollständig, lesbar
+  FILE_STATE_DELETED = 3;   // Tombstone
+}
+
+enum NodeState {
+  NODE_STATE_UNSPECIFIED = 0;
+  NODE_STATE_ACTIVE = 1;   // nimmt neue Chunks an
+  NODE_STATE_DRAINING = 2; // hält Bestand, nimmt nichts Neues an
+  NODE_STATE_DEAD = 3;     // > 15s ohne Heartbeat
+}

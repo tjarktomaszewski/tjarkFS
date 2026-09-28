@@ -1,0 +1,71 @@
+syntax = "proto3";
+
+package tjarkfs.v1;
+
+import "tjarkfs/v1/control.proto";
+
+option go_package = "github.com/tjarktomaszewski/tjarkFS/gen/proto/tjarkfs/v1;tjarkfs";
+
+// StorageNode: speichert nur Chunks, kennt keine Metadaten.
+service StorageNode {
+  // Client-Streaming, idempotent (Content-Addressing). Dient auch der
+  // Pipeline-Replikation (Primär-Fan-out).
+  rpc PutChunk(stream PutChunkRequest) returns (PutChunkResponse);
+  // Server-Streaming. Client verifiziert SHA256(data) == chunk_id.
+  rpc GetChunk(GetChunkRequest) returns (stream GetChunkResponse);
+  // Controlplane: Chunk physisch entfernen.
+  rpc DeleteChunk(DeleteChunkRequest) returns (DeleteChunkResponse);
+  // Pull-Replikation: Ziel-Node streamt sich das Replikat.
+  rpc ReplicateChunk(ReplicateChunkRequest) returns (stream GetChunkResponse);
+  // Status (Debug/Rebalance).
+  rpc GetNodeInfo(GetNodeInfoRequest) returns (GetNodeInfoResponse);
+  rpc SetNodeState(SetNodeStateRequest) returns (SetNodeStateResponse);
+}
+
+message PutChunkRequest {
+  string chunk_id = 1; // nur in der ersten Message
+  int64 size = 2;      // Gesamtgröße, erste Message
+  bytes data = 3;      // Daten-Part
+  string file_id = 4;
+  int64 fence_token = 5;
+  int64 position = 6;
+}
+
+message PutChunkResponse {
+  bool stored = 1;  // true = neu geschrieben
+  bool existed = 2; // true = Dedup-Shortcircuit
+}
+
+message GetChunkRequest { string chunk_id = 1; }
+
+message GetChunkResponse {
+  string chunk_id = 1; // nur in der ersten Message
+  int64 size = 2;      // Gesamtgröße, erste Message
+  bytes data = 3;
+}
+
+message DeleteChunkRequest { string chunk_id = 1; }
+
+message DeleteChunkResponse { bool deleted = 1; } // false = existierte nicht
+
+message ReplicateChunkRequest {
+  string chunk_id = 1;
+  string requested_by = 2; // node_id des Ziel-Nodes (Audit)
+}
+
+message GetNodeInfoRequest {}
+
+message GetNodeInfoResponse {
+  string node_id = 1;
+  string address = 2;
+  int64 capacity = 3;
+  int64 used = 4;
+  int64 chunk_count = 5;
+}
+
+message SetNodeStateRequest {
+    string node_id = 1;
+    NodeState state = 2;
+}
+
+message SetNodeStateResponse {}

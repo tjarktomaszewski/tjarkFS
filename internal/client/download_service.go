@@ -28,7 +28,7 @@ func (d *DownloadService) Download(id domain.FileID, w io.Writer) error {
 	for _, chunkID := range file.Chunks {
 		chunkReader, err := d.reader.Read(chunkID)
 		if err != nil {
-			return fmt.Errorf("read chunk %x: %w", chunkID, err)
+			return fmt.Errorf("read chunk %s: %w", chunkID, err)
 		}
 
 		// Close immediately after the copy, not via defer inside the loop:
@@ -37,10 +37,10 @@ func (d *DownloadService) Download(id domain.FileID, w io.Writer) error {
 		_, copyErr := io.Copy(w, chunkReader)
 		closeErr := chunkReader.Close()
 		if copyErr != nil {
-			return fmt.Errorf("write chunk %x: %w", chunkID, copyErr)
+			return fmt.Errorf("write chunk %s: %w", chunkID, copyErr)
 		}
 		if closeErr != nil {
-			return fmt.Errorf("close chunk %x: %w", chunkID, closeErr)
+			return fmt.Errorf("close chunk %s: %w", chunkID, closeErr)
 		}
 	}
 

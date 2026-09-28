@@ -6,9 +6,15 @@ import (
 )
 
 func main() {
-	if err := newRootCmd().Execute(); err != nil {
-		// Die Root-Command hat SilenceErrors: true gesetzt, daher druckt
-		// Cobra den Fehler nicht selbst - das übernehmen wir hier.
+	root, err := newRootCmd()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
+	if err := root.Execute(); err != nil {
+		// Root command has SilenceErrors: true, cobra does not print error
+		// we do it here
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

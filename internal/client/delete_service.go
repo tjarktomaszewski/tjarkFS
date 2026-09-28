@@ -35,7 +35,7 @@ func (d *DeleteService) Delete(id domain.FileID) error {
 	var chunkErrors []error
 	for _, chunkID := range unreferenced {
 		if err := d.remover.Remove(chunkID); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			chunkErrors = append(chunkErrors, fmt.Errorf("remove chunk %x: %w", chunkID, err))
+			chunkErrors = append(chunkErrors, fmt.Errorf("remove chunk %s: %w", chunkID, err))
 		}
 	}
 

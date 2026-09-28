@@ -17,7 +17,7 @@ func NewStoreRemover(store domain.Store) *StoreRemover {
 
 func (r *StoreRemover) Remove(id domain.ChunkID) error {
 	if err := r.store.Delete(string(id)); err != nil {
-		return fmt.Errorf("remove chunk %x from store: %w", id, err)
+		return fmt.Errorf("remove chunk %s from store: %w", id, err)
 	}
 	return nil
 }
