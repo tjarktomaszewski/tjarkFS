@@ -15,6 +15,8 @@ type fakeStore struct {
 
 func (f *fakeStore) Put(string, io.Reader) error { return nil }
 
+func (f *fakeStore) PutAtomic(string, func(io.Writer) error) error { return nil }
+
 func (f *fakeStore) Get(string) (io.ReadCloser, error) { return nil, nil }
 
 func (f *fakeStore) Delete(id string) error {
@@ -54,7 +56,7 @@ func TestStoreRemoverRemoveWrapsError(t *testing.T) {
 }
 
 func TestStoreRemoverRemoveKeepsNotExistSentinel(t *testing.T) {
-	store := &fakeStore{deleteErr: FileNotFoundErr}
+	store := &fakeStore{deleteErr: fs.ErrNotExist}
 	remover := NewStoreRemover(store)
 
 	err := remover.Remove("c1")

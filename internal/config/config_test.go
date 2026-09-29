@@ -91,7 +91,7 @@ func TestEnvUeberschreibtListenUndKapazitaet(t *testing.T) {
 
 	capacity, err := ParseChunkSize(s.Capacity)
 	require.NoError(t, err)
-	assert.Equal(t, int64(2<<30), capacity, "Sufixe wie --capacity=10G aus Phase 11")
+	assert.Equal(t, int64(2<<30), capacity, "Sufix like --capacity=10G")
 
 	cp, err := NewControlPlane()
 	require.NoError(t, err)

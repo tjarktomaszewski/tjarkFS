@@ -10,10 +10,6 @@ import (
 	"strings"
 )
 
-var (
-	FileNotFoundErr = fs.ErrNotExist
-)
-
 type FilesystemStore struct {
 	rootDir string
 	logger  *slog.Logger
@@ -29,7 +25,20 @@ func NewFileSystemStorage(root string, logger *slog.Logger) *FilesystemStore {
 	}
 }
 
+// Put writes the chunk read from r. Callers that need to inspect the bytes
+// while they are written — the storage node verifies the content hash —
+// use PutAtomic.
 func (s *FilesystemStore) Put(id string, r io.Reader) error {
+	return s.PutAtomic(id, func(w io.Writer) error {
+		_, err := io.Copy(w, r)
+		return err
+	})
+}
+
+// PutAtomic writes the chunk from the bytes fill writes to its writer. The
+// write happens in a temporary file that is renamed onto the final path only
+// after fill returned without error.
+func (s *FilesystemStore) PutAtomic(id string, fill func(w io.Writer) error) error {
 	target := s.getPathAndFileName(id)
 	dir := filepath.Dir(target)
 
@@ -49,8 +58,7 @@ func (s *FilesystemStore) Put(id string, r io.Reader) error {
 	// Removes the temp file on any error path; a no-op after a successful rename.
 	defer os.Remove(tmpPath)
 
-	n, err := io.Copy(tmp, r)
-	if err != nil {
+	if err := fill(tmp); err != nil {
 		_ = tmp.Close()
 		return fmt.Errorf("write chunk %s: %w", id, err)
 	}
@@ -71,7 +79,6 @@ func (s *FilesystemStore) Put(id string, r io.Reader) error {
 
 	s.logger.Info(
 		"written chunk to disk",
-		"bytes", n,
 		"target", target,
 	)
 
@@ -82,7 +89,7 @@ func (s *FilesystemStore) Get(id string) (io.ReadCloser, error) {
 	file, err := os.Open(s.getPathAndFileName(id))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, FileNotFoundErr
+			return nil, fs.ErrNotExist
 		}
 		return nil, err
 	}
@@ -96,7 +103,7 @@ func (s *FilesystemStore) Delete(id string) error {
 		return err
 	}
 	if !exists {
-		return FileNotFoundErr
+		return fs.ErrNotExist
 	}
 
 	path := s.getPathAndFileName(id)
