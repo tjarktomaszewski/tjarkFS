@@ -2,7 +2,6 @@ package store
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"io/fs"
 	"path/filepath"
@@ -36,17 +35,24 @@ func TestFileSystem(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
 
 	b, err := io.ReadAll(f)
 	if err != nil {
+		_ = f.Close()
 		t.Fatalf("read failed: %v", err)
+	}
+	// The reader is closed before the delete, not deferred past it: Windows
+	// refuses to remove a file with an open handle, while POSIX unlinks it
+	// and lets the open handle read to the end. The same test therefore
+	// means two different things on the two platforms unless the handle is
+	// gone first. See the Delete contract in filesystem_store.go.
+	if err := f.Close(); err != nil {
+		t.Fatalf("close failed: %v", err)
 	}
 
 	if string(b) != content {
 		t.Errorf("expected %s, got %s", content, string(b))
 	}
-	fmt.Printf("file content: %s", string(b))
 
 	if err := store.Delete(id); err != nil {
 		t.Fatalf("delete failed: %v", err)

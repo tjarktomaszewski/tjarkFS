@@ -8,8 +8,6 @@ import (
 	"errors"
 	"io"
 	"io/fs"
-	"log/slog"
-	"net"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -17,9 +15,7 @@ import (
 	"sync"
 	"testing"
 
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
 	tjarkfs "github.com/tjarktomaszewski/tjarkFS/gen/proto/tjarkfs/v1"
@@ -33,6 +29,7 @@ const testMaxRecvBytes = 8 << 20
 // runs over the same transport a client would use.
 type testNode struct {
 	client  tjarkfs.StorageNodeClient
+	server  *server.Server
 	store   *store.FilesystemStore
 	dataDir string
 }
@@ -40,45 +37,9 @@ type testNode struct {
 func newTestNode(t *testing.T) *testNode {
 	t.Helper()
 
-	dataDir := t.TempDir()
-	// The node logs one line per stored chunk; the test output stays about
-	// the test.
-	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
-	chunkStore := store.NewFileSystemStorage(dataDir, quiet)
-
-	// The message limit mirrors what main.go passes from --max-recv-bytes;
-	// gRPC would otherwise refuse any chunk above 4 MiB.
-	grpcServer := grpc.NewServer(grpc.MaxRecvMsgSize(testMaxRecvBytes))
-	tjarkfs.RegisterStorageNodeServer(
-		grpcServer,
-		server.NewStorageServer(chunkStore, nil, testMaxRecvBytes, quiet),
-	)
-
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen failed: %v", err)
-	}
-	go func() {
-		_ = grpcServer.Serve(listener)
-	}()
-	t.Cleanup(grpcServer.Stop)
-
-	conn, err := grpc.NewClient(
-		listener.Addr().String(),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
-	if err != nil {
-		t.Fatalf("dial failed: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = conn.Close()
-	})
-
-	return &testNode{
-		client:  tjarkfs.NewStorageNodeClient(conn),
-		store:   chunkStore,
-		dataDir: dataDir,
-	}
+	// A bare chunk server; the tests that care about the node's identity or
+	// its log build their own node through newNode.
+	return newNode(t, server.NodeInfo{}, nil)
 }
 
 // putStream streams one chunk: the header first, then one request per data

@@ -28,9 +28,8 @@ func TestUploadDownload(t *testing.T) {
 		nil,
 	)
 	t.Logf("storage directory: %s", tempDir)
-	writer := store.NewStoreWriter(chunkStore)
-
-	reader := store.NewStoreReader(chunkStore)
+	// One adapter fills all three chunk ports.
+	chunks := store.NewAdapter(chunkStore)
 
 	// Metadata
 
@@ -44,14 +43,14 @@ func TestUploadDownload(t *testing.T) {
 
 	uploadService := client.NewUploadService(
 		chunker.NewChunker,
-		writer,
+		chunks,
 		repository,
 		idGenerator,
 		10, // kleine Chunks für Test
 	)
 
 	downloadService := client.NewDownloadService(
-		reader,
+		chunks,
 		repository,
 	)
 
@@ -117,8 +116,7 @@ func TestUploadDownloadDeleteSharedChunks(t *testing.T) {
 	tempDir := t.TempDir()
 
 	chunkStore := store.NewFileSystemStorage(tempDir, nil)
-	writer := store.NewStoreWriter(chunkStore)
-	reader := store.NewStoreReader(chunkStore)
+	chunks := store.NewAdapter(chunkStore)
 
 	repository := metadata.NewMemoryFileRepository()
 
@@ -126,15 +124,15 @@ func TestUploadDownloadDeleteSharedChunks(t *testing.T) {
 
 	uploadService := client.NewUploadService(
 		chunker.NewChunker,
-		writer,
+		chunks,
 		repository,
 		idGenerator,
 		10, // kleine Chunks für Test
 	)
-	downloadService := client.NewDownloadService(reader, repository)
+	downloadService := client.NewDownloadService(chunks, repository)
 	deleteService := client.NewDeleteService(
 		repository,
-		store.NewStoreRemover(chunkStore),
+		chunks,
 	)
 
 	// Upload the same content under two names; both files must end up with

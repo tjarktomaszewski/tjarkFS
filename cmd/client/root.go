@@ -41,9 +41,7 @@ func newApp() (*app, error) {
 	}
 	logger := logger.NewLogger(cfg)
 	chunkStore := store.NewFileSystemStorage(cfg.DataDir, logger)
-	writer := store.NewStoreWriter(chunkStore)
-	reader := store.NewStoreReader(chunkStore)
-	remover := store.NewStoreRemover(chunkStore)
+	chunks := store.NewAdapter(chunkStore)
 
 	repository, err := metadata.NewSQLiteFileRepository(filepath.Join(cfg.DataDir, "tjarkfs.sqlite"))
 	if err != nil {
@@ -54,10 +52,10 @@ func newApp() (*app, error) {
 
 	return &app{
 		repository: repository,
-		upload:     client.NewUploadService(chunker.NewChunker, writer, repository, idGenerator, chunkSize),
-		download:   client.NewDownloadService(reader, repository),
+		upload:     client.NewUploadService(chunker.NewChunker, chunks, repository, idGenerator, chunkSize),
+		download:   client.NewDownloadService(chunks, repository),
 		list:       client.NewListService(repository),
-		deleteSvc:  client.NewDeleteService(repository, remover),
+		deleteSvc:  client.NewDeleteService(repository, chunks),
 	}, nil
 }
 

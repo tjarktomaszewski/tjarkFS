@@ -7,12 +7,25 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"sync"
 )
 
 type FilesystemStore struct {
 	rootDir string
 	logger  *slog.Logger
+	// renameMu makes concurrent writers of the same content-addressed chunk
+	// take turns over the final rename. It is not paranoia, it is Windows:
+	// os.Rename is MoveFileEx with MOVEFILE_REPLACE_EXISTING there, and that
+	// call returns ERROR_ACCESS_DENIED when two of them overlap on the same
+	// destination, even though nothing is wrong. POSIX rename(2) has no such
+	// window, which is why this never fires on Linux or macOS. Concurrent
+	// writers are normal here — a retried PutChunk looks exactly like that —
+	// and the lock is held for the rename alone, microseconds next to writing
+	// a whole chunk. Retrying instead does not work: the next attempt just
+	// runs into the next collision.
+	renameMu sync.Mutex
 }
 
 func NewFileSystemStorage(root string, logger *slog.Logger) *FilesystemStore {
@@ -73,7 +86,7 @@ func (s *FilesystemStore) PutAtomic(id string, fill func(w io.Writer) error) err
 		return fmt.Errorf("close chunk %s: %w", id, err)
 	}
 
-	if err := os.Rename(tmpPath, target); err != nil {
+	if err := s.rename(tmpPath, target); err != nil {
 		return fmt.Errorf("rename chunk %s: %w", id, err)
 	}
 
@@ -83,6 +96,15 @@ func (s *FilesystemStore) PutAtomic(id string, fill func(w io.Writer) error) err
 	)
 
 	return nil
+}
+
+// rename moves the finished temporary file onto the chunk's path, where it
+// becomes visible under the chunk id.
+func (s *FilesystemStore) rename(from, to string) error {
+	s.renameMu.Lock()
+	defer s.renameMu.Unlock()
+
+	return os.Rename(from, to)
 }
 
 func (s *FilesystemStore) Get(id string) (io.ReadCloser, error) {
@@ -97,6 +119,14 @@ func (s *FilesystemStore) Get(id string) (io.ReadCloser, error) {
 	return file, nil
 }
 
+// Delete removes the chunk and the directories it leaves empty. A chunk that
+// is not there comes back as fs.ErrNotExist.
+//
+// Callers have to close a reader before deleting the chunk. Windows refuses to
+// remove a file that still has an open handle, while POSIX unlinks it and lets
+// the open handle read to the end — so deleting a chunk that somebody is
+// downloading right now works on the platforms the project targets and fails
+// on Windows. That is a contract, not an error case.
 func (s *FilesystemStore) Delete(id string) error {
 	exists, err := s.Exists(id)
 	if err != nil {
@@ -146,6 +176,40 @@ func (s *FilesystemStore) getPathAndFileName(id string) string {
 		s.chunkPath(id),
 		id,
 	)
+}
+
+
+func (s *FilesystemStore) Usage() (used, chunkCount int64, err error) {
+	err = filepath.WalkDir(s.rootDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if len(d.Name()) != 64 {
+			return nil
+		}
+		if !isHexadecimal(d.Name()) {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		used += info.Size()
+		chunkCount++
+		return nil
+	})
+	return
+}
+
+func isHexadecimal(string string) bool {
+	// ^ matches start, [0-9a-fA-F]+ matches one or more hex chars, $ matches end
+	return regexp.MustCompile(`^[0-9a-fA-F]+$`).MatchString(string)
 }
 
 // Removes the given directory and all empty parent directories, stopping

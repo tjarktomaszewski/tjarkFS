@@ -13,4 +13,5 @@ type Store interface {
 	Get(id string) (io.ReadCloser, error)
 	Delete(id string) error
 	Exists(id string) (bool, error)
+	Usage() (used, chunkCount int64, err error)
 }

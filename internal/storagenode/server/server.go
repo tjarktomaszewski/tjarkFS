@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -9,8 +10,10 @@ import (
 	"io/fs"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"time"
 
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -49,7 +52,16 @@ type Server struct {
 	fence        Fence
 	logger       *slog.Logger
 	maxRecvBytes int64
+	nodeInfo     NodeInfo
+	state        atomic.Value
 	tjarkfs.UnimplementedStorageNodeServer
+}
+
+type NodeInfo struct {
+	NodeID   domain.NodeID
+	Address  string
+	DataDir  string
+	Capacity int64
 }
 
 var _ tjarkfs.StorageNodeServer = (*Server)(nil)
@@ -57,7 +69,7 @@ var _ tjarkfs.StorageNodeServer = (*Server)(nil)
 // NewStorageServer builds the storage node's gRPC adapter. A nil fence is
 // replaced by NoopFence and a nil logger by the default logger, mirroring the
 // store constructor. maxRecvBytes caps a single chunk; zero disables the cap.
-func NewStorageServer(store domain.Store, fence Fence, maxRecvBytes int64, logger *slog.Logger) *Server {
+func NewStorageServer(store domain.Store, fence Fence, maxRecvBytes int64, logger *slog.Logger, node NodeInfo) *Server {
 	if fence == nil {
 		fence = NoopFence{}
 	}
@@ -65,12 +77,18 @@ func NewStorageServer(store domain.Store, fence Fence, maxRecvBytes int64, logge
 		logger = slog.Default()
 	}
 
-	return &Server{
+	srv := &Server{
 		store:        store,
 		fence:        fence,
 		logger:       logger,
+		nodeInfo:     node,
 		maxRecvBytes: maxRecvBytes,
 	}
+	// A node nobody has spoken about yet accepts writes. Storing the initial
+	// state here makes that explicit instead of leaving it to the reader.
+	srv.state.Store(domain.NodeActive)
+
+	return srv
 }
 
 // PutChunk stores one chunk sent as a client stream: the first request carries
@@ -165,6 +183,144 @@ func (s *Server) GetChunk(req *tjarkfs.GetChunkRequest, stream tjarkfs.StorageNo
 	)
 
 	return nil
+}
+
+// Delete chunk deletes a chunk from the node storage.
+func (s *Server) DeleteChunk(ctx context.Context, req *tjarkfs.DeleteChunkRequest) (*tjarkfs.DeleteChunkResponse, error) {
+	start := time.Now()
+	chunkID := req.GetChunkId()
+	if err := validateChunkID(chunkID); err != nil {
+		return nil, err
+	}
+	err := s.store.Delete(chunkID)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, status.Errorf(codes.Internal, "error deleting chunkId %s: %v", chunkID, err)
+	}
+	deleted := err == nil
+	resp := &tjarkfs.DeleteChunkResponse{
+		Deleted: deleted,
+	}
+
+	s.logger.Debug(
+		"chunk delete request handled",
+		"chunk_id", chunkID,
+		"deleted", deleted,
+		"took", time.Since(start),
+	)
+
+	return resp, nil
+}
+
+func (s *Server) ReplicateChunk(req *tjarkfs.ReplicateChunkRequest, stream grpc.ServerStreamingServer[tjarkfs.GetChunkResponse]) error {
+	start := time.Now()
+
+	chunkID := req.GetChunkId()
+	if err := validateChunkID(chunkID); err != nil {
+		return err
+	}
+
+	sent, err := s.streamChunk(stream, chunkID)
+	if err != nil {
+		return err
+	}
+
+	s.logger.Debug(
+		"chunk streamed",
+		"chunk_id", chunkID,
+		"size", sent,
+		"requested_by", req.RequestedBy,
+		"took", time.Since(start),
+	)
+	return nil
+}
+
+func (s *Server) GetNodeInfo(_ context.Context, req *tjarkfs.GetNodeInfoRequest) (*tjarkfs.GetNodeInfoResponse, error) {
+	start := time.Now()
+	used, chunkCount, err := s.store.Usage()
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "get node info: %v", err)
+	}
+
+	resp := &tjarkfs.GetNodeInfoResponse{
+		NodeId:     string(s.nodeInfo.NodeID),
+		Address:    s.nodeInfo.Address,
+		Capacity:   s.nodeInfo.Capacity,
+		Used:       used,
+		ChunkCount: chunkCount,
+	}
+
+	s.logger.Debug(
+		"node info sent",
+		"took", time.Since(start),
+	)
+
+	return resp, nil
+}
+
+// SetNodeState takes over the state the controlplane assigned to this node.
+// The state lives in an atomic.Value because it is written from whichever
+// handler goroutine serves the call and read from the heartbeat goroutine
+// later on. A plain field would be a data race between the two.
+func (s *Server) SetNodeState(_ context.Context, req *tjarkfs.SetNodeStateRequest) (*tjarkfs.SetNodeStateResponse, error) {
+	start := time.Now()
+
+	// The mapped domain state, never the wire enum: one atomic.Value holds
+	// exactly one concrete type, and storing the other one panics.
+	state, err := toNodeState(req.GetState())
+	if err != nil {
+		return nil, err
+	}
+	s.state.Store(state)
+
+	// A node that is addressed under a different id has been reached by
+	// mistake. That deserves a warning, not an error: the caller is the
+	// controlplane, and refusing would only keep the state from being set.
+	if req.GetNodeId() != string(s.nodeInfo.NodeID) {
+		s.logger.Warn(
+			"node state set under a foreign node id",
+			"requested_for", req.GetNodeId(),
+			"this_node", s.nodeInfo.NodeID,
+			"state", state,
+		)
+	}
+
+	s.logger.Info(
+		"node state set",
+		"state", state,
+		"set_by", req.GetNodeId(),
+		"took", time.Since(start),
+	)
+
+	return &tjarkfs.SetNodeStateResponse{}, nil
+}
+
+// NodeState is the state this node was last told to be in. A node that was
+// never told anything is active; the assertion can only fail on a Server
+// built without the constructor, and answering ACTIVE beats panicking inside
+// the heartbeat goroutine.
+func (s *Server) NodeState() domain.NodeState {
+	if state, ok := s.state.Load().(domain.NodeState); ok {
+		return state
+	}
+
+	return domain.NodeActive
+}
+
+// toNodeState maps the wire enum onto the domain one. Proto3 enums are open —
+// a client may send any number — so the mapping needs a default branch, and
+// an unspecified state belongs in it: it is a forgotten value, not an
+// instruction.
+func toNodeState(wire tjarkfs.NodeState) (domain.NodeState, error) {
+	switch wire {
+	case tjarkfs.NodeState_NODE_STATE_ACTIVE:
+		return domain.NodeActive, nil
+	case tjarkfs.NodeState_NODE_STATE_DRAINING:
+		return domain.NodeDraining, nil
+	case tjarkfs.NodeState_NODE_STATE_DEAD:
+		return domain.NodeDead, nil
+	}
+
+	return "", status.Errorf(codes.InvalidArgument, "unknown node state %v", wire)
 }
 
 // streamChunk copies a chunk from the store to the client in fixed-size
