@@ -29,7 +29,9 @@ import (
 
 // newNode starts a storage node with its own data directory. node tells the
 // server which node it is; a nil logger keeps the node's per-chunk log lines
-// out of the test output.
+// out of the test output. The listener is opened here instead of through
+// Start(), so every test gets its own :0 port; the server is then built with
+// that address, exactly the way cmd/storagenode wires a real one.
 func newNode(t *testing.T, node server.NodeInfo, logger *slog.Logger) *testNode {
 	t.Helper()
 
@@ -44,16 +46,18 @@ func newNode(t *testing.T, node server.NodeInfo, logger *slog.Logger) *testNode 
 	}
 	chunkStore := store.NewFileSystemStorage(dataDir, logger)
 
-	// The message limit mirrors what main.go passes from --max-recv-bytes;
-	// gRPC would otherwise refuse any chunk above 4 MiB.
-	grpcServer := grpc.NewServer(grpc.MaxRecvMsgSize(testMaxRecvBytes))
-	srv := server.NewStorageServer(chunkStore, nil, testMaxRecvBytes, logger, node)
-	tjarkfs.RegisterStorageNodeServer(grpcServer, srv)
-
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen failed: %v", err)
 	}
+	node.ListenAddr = listener.Addr().String()
+
+	// The message limit mirrors what main.go passes from --max-recv-bytes;
+	// gRPC would otherwise refuse any chunk above 4 MiB.
+	grpcServer := grpc.NewServer(grpc.MaxRecvMsgSize(testMaxRecvBytes))
+	srv := server.NewStorageServer(chunkStore, nil, testMaxRecvBytes, node, logger)
+	tjarkfs.RegisterStorageNodeServer(grpcServer, srv)
+
 	go func() {
 		_ = grpcServer.Serve(listener)
 	}()
@@ -193,7 +197,7 @@ type failingStore struct{ domain.Store }
 func (failingStore) Delete(string) error { return errors.New("device is not ready") }
 
 func TestDeleteChunkReportsAStoreFailureAsAnError(t *testing.T) {
-	srv := server.NewStorageServer(failingStore{}, nil, testMaxRecvBytes, nil, server.NodeInfo{})
+	srv := server.NewStorageServer(failingStore{}, nil, testMaxRecvBytes, server.NodeInfo{}, nil)
 
 	// DeleteChunk is unary, so the handler can be called directly — which is
 	// the only way to hand the node a store that fails.

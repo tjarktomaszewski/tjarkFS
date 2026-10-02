@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"net"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -54,22 +55,43 @@ type Server struct {
 	maxRecvBytes int64
 	nodeInfo     NodeInfo
 	state        atomic.Value
+	grpc         *grpc.Server
+	// listener is the bound socket. Addr reads the real port from it after
+	// Start resolved a :0 to an actual one.
+	listener net.Listener
 	tjarkfs.UnimplementedStorageNodeServer
 }
 
+// NodeInfo is what the node tells the world about itself: who it is, where it
+// can be reached and how much room it has. A capacity of zero means unknown.
+//
+// ListenAddr is what this process binds and AdvertiseAddr is what other nodes
+// dial. They are often the same and sometimes cannot be: ":9100" is a valid
+// listener address and an undialable one, and behind NAT or in a container
+// the port the outside reaches is not the port the process opened. NewStorageServer
+// falls back to ListenAddr when no advertise address was given.
 type NodeInfo struct {
-	NodeID   domain.NodeID
-	Address  string
-	DataDir  string
-	Capacity int64
+	NodeID        domain.NodeID
+	ListenAddr    string
+	AdvertiseAddr string
+	DataDir       string
+	Capacity      int64
 }
 
 var _ tjarkfs.StorageNodeServer = (*Server)(nil)
 
 // NewStorageServer builds the storage node's gRPC adapter. A nil fence is
 // replaced by NoopFence and a nil logger by the default logger, mirroring the
-// store constructor. maxRecvBytes caps a single chunk; zero disables the cap.
-func NewStorageServer(store domain.Store, fence Fence, maxRecvBytes int64, logger *slog.Logger, node NodeInfo) *Server {
+// store constructor. maxRecvBytes caps a single chunk; zero or less disables
+// the cap. Turning a capacity string into bytes and picking the address to
+// advertise is the caller's job — cmd/storagenode is where the flags live.
+func NewStorageServer(
+	store domain.Store,
+	fence Fence,
+	maxRecvBytes int64,
+	info NodeInfo,
+	logger *slog.Logger,
+) *Server {
 	if fence == nil {
 		fence = NoopFence{}
 	}
@@ -81,7 +103,7 @@ func NewStorageServer(store domain.Store, fence Fence, maxRecvBytes int64, logge
 		store:        store,
 		fence:        fence,
 		logger:       logger,
-		nodeInfo:     node,
+		nodeInfo:     info,
 		maxRecvBytes: maxRecvBytes,
 	}
 	// A node nobody has spoken about yet accepts writes. Storing the initial
@@ -89,6 +111,82 @@ func NewStorageServer(store domain.Store, fence Fence, maxRecvBytes int64, logge
 	srv.state.Store(domain.NodeActive)
 
 	return srv
+}
+
+// Addr reports the address the node listens on, or the empty string before
+// Start. With a :0 port this is the only way to learn the real one — which is
+// what the integration tests in Phase 4 and a container publishing a random
+// port both need.
+func (s *Server) Addr() string {
+	if s.listener == nil {
+		return ""
+	}
+	return s.listener.Addr().String()
+}
+
+// advertiseAddr is the address to hand to other nodes: the explicit one when
+// there is one, otherwise the address this process actually bound. The
+// fallback cannot live in the constructor — Start resolves a ":0" port
+// afterwards, and a node that kept advertising ":0" would be unreachable to
+// every node it had told about itself.
+func (s *Server) advertiseAddr() string {
+	if s.nodeInfo.AdvertiseAddr != "" {
+		return s.nodeInfo.AdvertiseAddr
+	}
+	return s.nodeInfo.ListenAddr
+}
+
+func (s *Server) Start() error {
+	l, err := net.Listen("tcp", s.nodeInfo.ListenAddr)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", s.nodeInfo.ListenAddr, err)
+	}
+	// The bound address is authoritative once the listener exists: :0 has just
+	// been resolved by the kernel, and Addr reports what it actually became.
+	s.nodeInfo.ListenAddr = l.Addr().String()
+	s.listener = l
+
+	// gRPC reads maxReceiveMessageSize as a plain upper bound, so passing 0
+	// would reject every message instead of removing the limit. The option is
+	// therefore only set when a cap was configured, and gRPC's own 4 MiB
+	// default stands otherwise.
+	if s.maxRecvBytes > 0 {
+		s.grpc = grpc.NewServer(grpc.MaxRecvMsgSize(int(s.maxRecvBytes)))
+	} else {
+		s.grpc = grpc.NewServer()
+	}
+	tjarkfs.RegisterStorageNodeServer(s.grpc, s)
+
+	go func() {
+		if err := s.grpc.Serve(l); err != nil {
+			s.logger.Error("serve stopped", "err", err)
+		}
+	}()
+
+	s.logger.Info("storage node listening",
+		"node_id", s.nodeInfo.NodeID,
+		"addr", s.nodeInfo.ListenAddr,
+		"advertise", s.advertiseAddr(),
+	)
+	return nil
+}
+
+func (s *Server) GracefulStop(ctx context.Context) error {
+	if s.grpc == nil {
+		s.logger.Info("server was never started, nothing to stop")
+		return nil
+	}
+	stopped := make(chan struct{})
+	go func() { s.grpc.GracefulStop(); close(stopped) }()
+	select {
+	case <-stopped:
+		s.logger.Info("shutdown complete")
+		return nil
+	case <-ctx.Done():
+		s.logger.Warn("shutdown deadline passed, pending rpcs cancelled")
+		s.grpc.Stop() // hard stop, cancel open streams
+		return ctx.Err()
+	}
 }
 
 // PutChunk stores one chunk sent as a client stream: the first request carries
@@ -243,7 +341,7 @@ func (s *Server) GetNodeInfo(_ context.Context, req *tjarkfs.GetNodeInfoRequest)
 
 	resp := &tjarkfs.GetNodeInfoResponse{
 		NodeId:     string(s.nodeInfo.NodeID),
-		Address:    s.nodeInfo.Address,
+		Address:    s.advertiseAddr(),
 		Capacity:   s.nodeInfo.Capacity,
 		Used:       used,
 		ChunkCount: chunkCount,

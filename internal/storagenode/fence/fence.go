@@ -13,7 +13,6 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-
 const dbName = "fences.db"
 
 const schema = `

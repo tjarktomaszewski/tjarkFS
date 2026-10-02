@@ -1,9 +1,13 @@
 run:
 	@go run ./cmd/client $(ARGS)
 
+run-node:
+	@go run ./cmd/storagenode $(ARGS)
+
 build:
 	@mkdir -p bin
 	@go build -o bin/tjarkfs ./cmd/client
+	@go build -o bin/tjarkfs-storagenode ./cmd/storagenode
 
 test:
 	@go test ./... -cover
@@ -26,4 +30,4 @@ proto:
 		--go-grpc_out=. --go-grpc_opt=module=github.com/tjarktomaszewski/tjarkFS \
 		api/proto/tjarkfs/v1/*.proto
 
-.PHONY: run build test test-race proto
+.PHONY: run run-node build test test-race proto

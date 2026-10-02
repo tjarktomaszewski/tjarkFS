@@ -47,19 +47,25 @@ func NewClient() (*Client, error) {
 }
 
 type StorageNode struct {
-	ListenAddr        string        // --listen
+	ListenAddr        string        // --listen, what this process binds
+	AdvertiseAddr     string        // --advertise, what other nodes dial; empty = ListenAddr
 	DataDir           string        // --data-dir
 	NodeID            string        // --node-id, empty = UUID in <data-dir>/node-id
 	Capacity          string        // --capacity, with Suffix (e.g. 10G), 0 = undefined
 	HeartbeatInterval time.Duration // --heartbeat-interval
 	MaxRecvBytes      int64         // --max-recv-bytes
 	ScrubInterval     time.Duration // --scrub-interval
+	Verbose           bool          // --verbose
 
 	FlagSet *flag.FlagSet
 }
 
 func NewStorageNode() (*StorageNode, error) {
 	heartbeatInterval, err := env("HEARTBEAT_INTERVAL", 5*time.Second, parseDuration)
+	if err != nil {
+		return nil, err
+	}
+	verbose, err := env("VERBOSE", false, parseBool)
 	if err != nil {
 		return nil, err
 	}
@@ -75,19 +81,23 @@ func NewStorageNode() (*StorageNode, error) {
 	s := &StorageNode{FlagSet: flag.NewFlagSet("tjarkfs-storagenode", flag.ContinueOnError)}
 
 	s.FlagSet.StringVar(&s.ListenAddr, "listen", envString("LISTEN_ADDR", ":9100"),
-		"Adresse, auf der der StorageNode gRPC annimmt")
+		"Address, the StorageNode accepts gRPC on")
+	s.FlagSet.StringVar(&s.AdvertiseAddr, "advertise", envString("ADVERTISE_ADDR", ""),
+		"Address other nodes dial this node on; empty = --listen")
 	s.FlagSet.StringVar(&s.DataDir, "data-dir", envString("DATA_DIR", "./data/node"),
-		"Verzeichnis für Chunks, Fence-Sidecar und Node-ID")
+		"Folder for Chunks, Fence-DB and Node-ID")
 	s.FlagSet.StringVar(&s.NodeID, "node-id", envString("NODE_ID", ""),
-		"Node-ID; leer = einmalig generierte UUID in <data-dir>/node-id")
+		"Node-ID; empty = set generated UUID once in <data-dir>/node-id")
 	s.FlagSet.StringVar(&s.Capacity, "capacity", envString("CAPACITY", "0"),
-		"Kapazität mit Suffix (z. B. 10G), 0 = unbestimmt; Bytes via config.ParseChunkSize")
+		"Capacity with suffix (e.g. 10G), 0 = undefined; bytes via config.ParseChunkSize")
 	s.FlagSet.DurationVar(&s.HeartbeatInterval, "heartbeat-interval", heartbeatInterval,
-		"Takt des Heartbeats zum Controlplane")
+		"Frequency of heartbeats to controlplane")
 	s.FlagSet.Int64Var(&s.MaxRecvBytes, "max-recv-bytes", maxRecvBytes,
-		"Maximal empfangene Bytes pro PutChunk-Stream")
+		"Maximum received bytes per PutChunk-Stream")
 	s.FlagSet.DurationVar(&s.ScrubInterval, "scrub-interval", scrubInterval,
-		"Takt des Scrubbers")
+		"Frequency of scrubbing")
+	s.FlagSet.BoolVar(&s.Verbose, "verbose", verbose,
+		"verbose logging")
 
 	return s, nil
 }
@@ -149,27 +159,27 @@ func NewControlPlane() (*ControlPlane, error) {
 	c := &ControlPlane{FlagSet: flag.NewFlagSet("tjarkfs-controlplane", flag.ContinueOnError)}
 
 	c.FlagSet.StringVar(&c.ListenAddr, "listen", envString("LISTEN_ADDR", ":9000"),
-		"Adresse, auf der der ControlPlane gRPC annimmt")
+		"Adress, the controlPlane accepts gRPC on")
 	c.FlagSet.StringVar(&c.DataDir, "data-dir", envString("DATA_DIR", "./data/cp"),
-		"Verzeichnis für die Metadaten-DB")
+		"Folder for metadata-db")
 	c.FlagSet.DurationVar(&c.UploadTTL, "upload-ttl", uploadTTL,
-		"Alter, ab dem ein UPLOADING-File als abgestorben gilt")
+		"Time, after which an UPLOADING-File counts as died")
 	c.FlagSet.DurationVar(&c.HeartbeatTimeout, "heartbeat-timeout", heartbeatTimeout,
-		"Alter des letzten Heartbeats, ab dem ein Node als DEAD gilt")
+		"Time of last heartbeat, after which a node counts as dead")
 	c.FlagSet.DurationVar(&c.LeaseTTL, "lease-ttl", leaseTTL,
-		"Gültigkeitsdauer einer Lease")
+		"Validity period of a lease")
 	c.FlagSet.IntVar(&c.ReplicationTarget, "replication-target", replicationTarget,
-		"Anzahl angestrebter Replikate pro Chunk")
+		"Number of target replicates per chunk")
 	c.FlagSet.Float64Var(&c.RebalanceThreshold, "rebalance-threshold", rebalanceThreshold,
-		"used/capacity, ab dem ein Node auf DRAINING gesetzt wird")
+		"used/capacity, at which a Node is set to DRAINING")
 	c.FlagSet.DurationVar(&c.GCInterval, "gc-interval", gcInterval,
-		"Takt des Aufräumers für abgestorbene Uploads")
+		"Interval of cleanup for died uploads")
 	c.FlagSet.DurationVar(&c.RepairInterval, "repair-interval", repairInterval,
-		"Takt des Repair-Workers")
+		"Interval of repair-workers")
 	c.FlagSet.DurationVar(&c.RebalanceInterval, "rebalance-interval", rebalanceInterval,
-		"Takt des Rebalance-Workers")
+		"Interval of rebalance-workers")
 	c.FlagSet.BoolVar(&c.RebalanceEnabled, "rebalance-enabled", rebalanceEnabled,
-		"Load-aware Placement (LoadAware) statt reinem Rendezvous-Hashing")
+		"Load-aware Placement (LoadAware) instead of rendezvous-hashing")
 
 	return c, nil
 }

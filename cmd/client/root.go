@@ -39,7 +39,7 @@ func newApp() (*app, error) {
 	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
-	logger := logger.NewLogger(cfg)
+	logger := logger.NewLogger(slog.LevelInfo)
 	chunkStore := store.NewFileSystemStorage(cfg.DataDir, logger)
 	chunks := store.NewAdapter(chunkStore)
 

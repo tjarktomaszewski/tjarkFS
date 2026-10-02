@@ -178,7 +178,6 @@ func (s *FilesystemStore) getPathAndFileName(id string) string {
 	)
 }
 
-
 func (s *FilesystemStore) Usage() (used, chunkCount int64, err error) {
 	err = filepath.WalkDir(s.rootDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
